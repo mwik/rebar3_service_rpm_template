@@ -1,0 +1,17 @@
+# -*- mode: sh -*-
+# CPUSET_CONFIGURED controls whether the beam process is started in a
+# cpuset.  Use "true" to enable, empty or "false" to disable.  If
+# enabled, be sure to add a line containing "${CPUSET_ERLRUN_ARGS} to
+# your vm.args file.  You should use a Slack fixfiles script to expand
+# the CPUSET_CPUSPEC, SCHEDULERS, and TOPO macros.
+#CPUSET_CONFIGURED=true
+
+# CPUSET_CPUSPEC specifies the --cpu argument to the "cset shield" command.
+#CPUSET_CPUSPEC=@@CPUSET_CPUSPEC@@
+
+# CPUSET_ERLRUN_ARGS specifies extra arguments to the erl command
+# line.  This variable must be exported.
+#export CPUSET_ERLRUN_ARGS="+S @@SCHEDULERS@@ +sbt ns +sct @@TOPO@@"
+
+# Overrides default limit on number of open file descriptors.
+#ULIMIT_MAX_FDS=1024

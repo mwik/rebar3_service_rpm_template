@@ -1,0 +1,8 @@
+{{=<% %>=}}
+-sname {{package_service_name}}
+
+-setcookie {{package_service_name}}_cookie
+
++K true
++A30
+<%={{ }}=%>

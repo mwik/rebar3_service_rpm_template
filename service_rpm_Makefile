@@ -1,0 +1,19 @@
+all:
+	rebar3 compile
+
+test:
+	rebar3 eunit
+
+package:
+	REBAR3_BUILD_RPM_BUILD_NUMBER=1 \
+	  rebar3 as prod build_rpm
+
+# release should copy the built rpm to whereever it should be put
+release:
+	echo "copy rpm to yum?"
+
+clean:
+	rebar3 clean
+
+maintainer-clean: clean
+	rm -rf _build

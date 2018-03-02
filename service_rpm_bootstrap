@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# install any rpms you might need to be around here, maybe something like
+#
+# % sudo yum install erlang rebar3
+

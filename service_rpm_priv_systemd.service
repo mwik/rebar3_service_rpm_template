@@ -1,0 +1,11 @@
+{{=<% %>=}}
+[Unit]
+Description={{package_summary}}
+
+[Service]
+ExecStart=/etc/rc.d/init.d/{{package_service_name}} foreground
+Type=simple
+
+[Install]
+WantedBy=default.target
+<%={{ }}=%>

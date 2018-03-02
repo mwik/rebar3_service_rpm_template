@@ -1,0 +1,295 @@
+{{=<% %>=}}#!/bin/sh
+#
+# {{package_name}}
+#
+# chkconfig: 345 99 1
+# description: {{package_summary}}
+# processname: beam.smp
+# config: /etc/{{package_service_name}}/app.config
+# config: /etc/{{package_service_name}}/vm.args
+# config: /etc/sysconfig/{{package_service_name}}
+#
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+RETVAL=0
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+NAME={{package_service_name}}
+RELEASE={{release_name}}
+DAEMON=/usr/lib64/$RELEASE/bin/$RELEASE
+USER={{package_service_user}}
+lockfile=/var/lock/subsys/$NAME
+pidfile=/var/run/$NAME/$NAME.pid
+
+# run_erl will place pipes and logs here
+# NOTE: the trailing '/' is necessary for run_erl for some reason?
+PIPE_DIR=/var/run/$NAME/
+RUNNER_LOG_DIR=/var/log/$NAME
+export PIPE_DIR RUNNER_LOG_DIR
+
+# these overwrite default locations for configs
+VMARGS_PATH=/etc/$NAME/vm.args
+RELX_CONFIG_PATH=/etc/$NAME/sys.config
+export VMARGS_PATH RELX_CONFIG_PATH
+
+# The following two definitions cause variables of the form ${VAR} in
+# vm.args and system.config to be replaced with values from the
+# environment; the substituted files will be in the
+# $RELX_OUT_FILE_PATH directory.
+export RELX_REPLACE_OS_VARS=true
+export RELX_OUT_FILE_PATH="/var/run/$NAME"
+
+# Check for daemon script
+[ -x $DAEMON ] || exit 0
+# Check for config directory
+[ -d /etc/$NAME ] || exit 0
+
+# Check for data directory?
+# [ -d /var/lib/$NAME ] || exit 0
+
+# Read configuration variable file if it is present and readable
+test -r "/etc/sysconfig/$NAME" && source "/etc/sysconfig/$NAME"
+
+# `service` strips all environmental VARS so
+# if no HOME was set in /etc/sysconfig/$NAME then set one here
+# to the data directory for erlexec's sake
+if [ -z "$HOME" ]; then
+  export HOME=/var/run/$NAME
+fi
+
+# Determine if the service is running.  If supervisord seems to be
+# running and includes the service, then delegate to it.
+if which supervisorctl >/dev/null 2>&1 && \
+   supervisorctl avail | grep $NAME > /dev/null ; then
+  out=$(supervisorctl status $NAME 2>&1 | awk '{print $2'})
+  case $out in
+    RUNNING)
+      running=0
+      ;;
+    STOPPED)
+      running=1
+      ;;
+  esac 
+else 
+  status -p $pidfile -l $(basename $lockfile) $NAME >/dev/null 2>&1
+  running=$?
+fi
+
+check_pid_status() {
+  pid=$(ps ax | grep beam.smp | grep -E "\-progname [^ ]*$NAME " | awk '{print $1}')
+  if [ "$pid" = "" ]; then
+    # prog not running?
+    return 1
+  else
+    # running
+    return 0
+  fi
+}
+
+# Set the PID global variable, return 1 on error
+get_pid() {
+  PID=`$DAEMON pid < /dev/null`
+  if [ "$?" -ne 0 ]; then
+    echo "Node is not running!"
+    return 1
+  fi
+
+  # don't allow empty or init pid's
+  if [ -z $PID ] || [ "$PID" -le 1 ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+# Configures cpuset if enabled.  Returns exit status 0 if enabled, 1 if disabled.
+configure_cpuset() {
+  # Set up cpuset if configured in sysconfig file.  If so, we expect
+  # CPUSET_CPUSPEC to specify the shield configuration and
+  # CPUSET_ERLRUN_ARGS to configure the erlang beam topology.
+  local cpuset=1
+  if test "$CPUSET_CONFIGURED" = true; then
+    if ! test -x /usr/bin/cset; then
+      echo "cpuset configured but cset command not installed" 1>&2
+    elif cset set user >/dev/null 2>&1; then
+      # cset was already running
+      cpuset=0
+    elif cset shield --cpu "$CPUSET_CPUSPEC" -k on >/dev/null 2>&1; then
+      # cset was started successfully
+      cpuset=0
+    else
+      echo "cpuset configuration failed" 1>&2
+    fi
+  else
+    # Warn if cpuset is running but is not configured.
+    if test -x /usr/bin/cset && cset set user >/dev/null 2>&1; then
+      echo "cpuset running but not starting erlang in it" 1>&2
+    fi
+  fi
+  if test $cpuset = 1; then
+    unset CPUSET_ERLRUN_ARGS
+  fi
+  return $cpuset
+}
+
+start() {
+  # Start daemons.
+
+  # Set max open file descriptors.
+  if test "${ULIMIT_MAX_FDS:-0}" -ge 32; then
+    ulimit -n $ULIMIT_MAX_FDS
+  fi
+
+  # If supervisord seems to be running and includes the service, then
+  # delegate to it.
+  if which supervisorctl >/dev/null 2>&1 && \
+     supervisorctl avail | grep $NAME > /dev/null ; then
+    exec /usr/bin/supervisorctl start $NAME
+  else
+    echo -n $"Starting $NAME: "
+    local cset_shield
+    if configure_cpuset; then
+      cset_shield="cset shield -e"
+    fi
+    # This is a little tricky.  If the cpuset is configured, we run
+    # the $DAEMON command inside the cpuset and the cset command
+    # parses the '--user' argument; otherwise the '--user' argument is
+    # parsed by the daemon function.
+    daemon --pidfile $pidfile $cset_shield --user $USER $DAEMON start
+    RETVAL=$?
+    if [ $RETVAL -eq 0 ]; then
+      touch $lockfile
+      for n in $(seq 1 10); do
+        sleep 1
+        get_pid
+        RETVAL=$?
+        if [ $RETVAL -eq 1 ]; then
+          break
+        fi
+      done
+      echo $PID > $pidfile
+      success
+    else
+      failure $"$NAME start"
+    fi
+    echo
+    return $RETVAL
+  fi
+}
+
+stop() {
+  # if supervisord seems to be running and includes the service, then
+  if which supervisorctl >/dev/null 2>&1 && \
+     supervisorctl avail | grep $NAME > /dev/null ; then
+    # delegate to supervisorctl
+    exec /usr/bin/supervisorctl stop $NAME
+  else
+    if [ $running -eq 0 ]; then
+      # Stop daemon.
+      echo -n $"Shutting down $NAME: "
+      $DAEMON stop 2>&1 >/dev/null
+      for n in $(seq 1 10); do
+        sleep 1
+        check_pid_status
+        RETVAL=$?
+        if [ $RETVAL -eq 1 ]; then
+          break
+        fi
+      done
+      if [ $RETVAL -eq 1 ]; then
+        rm -f $lockfile $pidfile
+        success
+        echo && return 0
+      else
+        failure $"$NAME stop"
+        echo && return 1
+      fi
+    else
+      check_pid_status
+      RETVAL=$?
+      if [ $RETVAL -eq 1 ]; then
+        rm -f $lockfile $pidfile
+      fi
+      exit 0
+    fi
+  fi
+}
+
+restart() {
+  # if supervisord seems to be running and includes the service, then
+  if which supervisorctl >/dev/null 2>&1 && \
+     supervisorctl avail | grep $NAME > /dev/null ; then
+    # delegate to supervisorctl
+    exec /usr/bin/supervisorctl restart $NAME
+  else
+    stop
+    start
+  fi
+}
+
+hardstop() {
+  echo -n $"Shutting down $NAME: "
+  su - $USER -c "ps -ef | grep beam.smp | grep -E '\-progname [^ ]*$NAME ' | grep -v grep | awk '{print \$2}' | xargs kill -9"
+  for n in $(seq 1 10); do
+    sleep 1
+    check_pid_status
+    RETVAL=$?
+    if [ $RETVAL -eq 1 ]; then
+      break
+    fi
+  done
+  if [ $RETVAL -eq 1 ]; then
+    rm -f $lockfile $pidfile
+    success
+    echo && return 0
+  else
+    failure $"$NAME hardstop"
+    echo && return 1
+  fi
+}
+
+# See how we were called.
+case "$1" in
+  start)
+    [ $running -eq 0 ] && exit 0
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart|force-reload)
+    if [ $running -eq 0 ] ; then
+      restart
+    fi
+    ;;
+  hardstop)
+    [ $running -eq 0 ] || exit 0
+    hardstop
+    ;;
+  condrestart|try-restart)
+    [ $running -eq 0 ] || exit 0
+    restart
+    ;;
+  status)
+    # if supervisord seems to be running and includes the service, then
+    if which supervisorctl >/dev/null 2>&1 && \
+       supervisorctl avail | grep $NAME > /dev/null ; then
+      # delegate to supervisorctl
+      exec /usr/bin/supervisorctl status $NAME
+    else
+      status -p $pidfile -l $(basename $lockfile) $NAME
+    fi
+    ;;
+  ping)
+    $DAEMON ping || exit $?
+    ;;
+  foreground)
+    exec $DAEMON foreground
+    ;;
+  *)
+    echo $"Usage: $0 {start|stop|restart|force-reload|hardstop|condrestart|try-restart|status|ping}"
+    exit 1
+esac
+
+exit $?<%={{ }}=%>

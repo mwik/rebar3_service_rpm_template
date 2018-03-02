@@ -1,0 +1,94 @@
+{{=<% %>=}}#!/bin/sh
+#
+# {{package_name}}
+#
+
+NAME={{package_service_name}}
+RELEASE={{release_name}}
+DAEMON_USER={{package_service_user}}
+DAEMON=/usr/lib64/$RELEASE/bin/$RELEASE
+
+# run_erl will place pipes and logs here
+# NOTE: the trailing '/' is necessary for run_erl for some reason?
+PIPE_DIR=/var/run/$NAME/
+RUNNER_LOG_DIR=/var/log/$NAME
+export PIPE_DIR RUNNER_LOG_DIR
+
+# these overwrite default locations for configs
+VMARGS_PATH=/etc/$NAME/vm.args
+RELX_CONFIG_PATH=/etc/$NAME/sys.config
+export VMARGS_PATH RELX_CONFIG_PATH
+
+# Check for daemon script
+[ -x $DAEMON ] || exit 0
+
+if [ -z "$HOME" ]; then
+  export HOME=/var/run/$NAME
+fi
+
+# See how we were called.
+case "$1" in
+  eval)
+    $DAEMON $*
+    ;;
+  remsh)
+    $DAEMON remote_console
+    ;;
+  entop)
+    ERL=$(ls /usr/lib64/$RELEASE/erts-*/bin/erl)
+
+    COOKIE=$($DAEMON eval 'erlang:get_cookie()')
+    if [ $? -ne 0 ] ; then
+      echo $COOKIE
+      exit $?
+    fi
+    # sometimes cookies have single quotes, we'll get rid of them
+    COOKIE=$(echo $COOKIE | cut -f2 -d"'")
+
+    NODE=$($DAEMON eval 'node()')
+    if [ $? -ne 0 ] ; then
+      echo $NODE
+      exit $?
+    fi
+
+    ID="entop$(od -t x -N 4 /dev/urandom | head -n1 | awk '{print $2}')-$NAME"
+
+    # Extract the target node name from node.args
+    NAME_ARG=$(egrep '^-s?name' "$VMARGS_PATH" || true)
+    # Perform replacement of variables in ${NAME_ARG}
+    NAME_ARG=$(eval echo "${NAME_ARG}")
+    # Extract the name type and name from the NAME_ARG for REMSH
+    NAME_TYPE="$(echo "$NAME_ARG" | awk '{print $1}')"
+
+    # when using snames you need the short host, so we need to add to our
+    # id in that case
+    case "${NAME_TYPE}" in
+      -sname)
+         # sometimes with a short name I found random extra "'' characters
+         ID=$ID@$(echo $NODE | cut -f2 -d'@' | cut -f1 -d"'")
+         ;;
+      -name)
+         ;;
+    esac
+
+    $ERL -boot start_clean \
+         -noinput \
+         -hidden \
+         +A 20 \
+         +Bc \
+         $NAME_TYPE $ID \
+         -setcookie $COOKIE \
+         -eval "entop:start($NODE)"
+    ;;
+  passthrough)
+    # remove passthrough
+    shift
+    # and pass rest to daemon process
+    /usr/bin/sudo -u $DAEMON_USER -E -- $DAEMON $*
+    ;;
+  *)
+    echo $"Usage: $0 {remsh|eval|entop|passthrough}"
+    exit 1
+esac
+
+exit $?<%={{ }}=%>

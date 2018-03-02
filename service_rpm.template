@@ -1,0 +1,40 @@
+%% -*- mode: erlang -*-
+{ description, "Rebar3 template for an erlang service" }.
+{ variables, [
+    { name, "myservice", "Name for the service, should consist of [a-zA-Z_]" },
+    { desc, "My Service", "A short description of the service" }
+  ]
+}.
+
+%% we need a gitignore
+{ template, "service_rpm.gitignore", "{{name}}/.gitignore" }.
+
+%% as well as a README
+{ template, "service_rpm_README.md", "{{name}}/README.md" }.
+
+%% as well as a rebar.config
+{ template, "service_rpm_rebar.config", "{{name}}/rebar.config" }.
+
+%% a bootstrap script to setup the dev environment
+{ template, "service_rpm_bootstrap", "{{name}}/bootstrap" }.
+{ chmod, "{{name}}/bootstrap", 8#00755}.
+
+%% a Makefile to wrap rebar3 commands
+{ template, "service_rpm_Makefile", "{{name}}/Makefile" }.
+
+%% for the release we need config
+{ template, "service_rpm_config_sys.config", "{{name}}/config/sys.config" }.
+{ template, "service_rpm_config_vm.args", "{{name}}/config/vm.args" }.
+{ template, "service_rpm_vars.config", "{{name}}/vars.config" }.
+
+%% as well as templates for start/stop scripts, rpm scripts, etc
+{ template, "service_rpm_priv_init.script", "{{name}}/priv/init.script" }.
+{ template, "service_rpm_priv_admin.script", "{{name}}/priv/admin.script" }.
+{ template, "service_rpm_priv_supervisord.ini", "{{name}}/priv/supervisord.ini" }.
+{ template, "service_rpm_priv_systemd.service", "{{name}}/priv/systemd.service" }.
+{ template, "service_rpm_priv_pkg.config", "{{name}}/priv/pkg.config" }.
+{ template, "service_rpm_priv_pre.sh", "{{name}}/priv/pre.sh" }.
+{ template, "service_rpm_priv_post.sh", "{{name}}/priv/post.sh" }.
+{ template, "service_rpm_priv_preun.sh", "{{name}}/priv/preun.sh" }.
+{ template, "service_rpm_priv_postun.sh", "{{name}}/priv/postun.sh" }.
+{ template, "service_rpm_priv_sysconfig.example", "{{name}}/priv/sysconfig.example" }.
