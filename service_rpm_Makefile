@@ -10,11 +10,11 @@ package:
 
 # release should copy the built rpm to whereever it should be put
 release:
-	echo "copy rpm to yum?"
+	@echo "copy rpm to yum?"
 
 clean:
 	@rm -rf _build/prod
 	@rebar3 clean
 
 maintainer-clean: clean
-	rm -rf _build
+	@rm -rf _build
