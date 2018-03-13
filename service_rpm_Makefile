@@ -13,6 +13,7 @@ release:
 	echo "copy rpm to yum?"
 
 clean:
+	@rm -rf _build/prod
 	@rebar3 clean
 
 maintainer-clean: clean
